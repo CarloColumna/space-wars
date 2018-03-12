@@ -1,0 +1,476 @@
+<!DOCTYPE html>
+<html>
+<head>
+	<title>Space Invaders</title>
+	<script type="text/javascript" src="js/phaser.min.js"></script>
+	<script type="text/javascript" src="js/HealthBar.standalone.js"></script>
+</head>
+<body>
+
+
+<script type="text/javascript">
+	
+var game = new Phaser.Game(800, 600, Phaser.AUTO, 'space-invaders', { preload: preload, create: create, update: update, render: render });
+
+function preload() {
+	//preloading the image sprites and audio files to be used in the game
+    game.load.image('hero_bullet', 'assets/hero_bullet.png');
+    game.load.image('enemyBullet', 'assets/enemy_bullet.png');
+    game.load.spritesheet('invader1', 'assets/alien_spaceship1.png', 32, 32);
+    game.load.spritesheet('invader2', 'assets/alien_spaceship2.png', 32, 32);
+    game.load.spritesheet('invader3', 'assets/alien_spaceship3.png', 32, 61);
+    game.load.spritesheet('invaderboss', 'assets/alien_spaceship4.png', 200, 200);
+    game.load.image('hero_ship', 'assets/hero_ship.png');
+    game.load.spritesheet('explosion_sprite', 'assets/explode.png', 128, 128);
+    game.load.image('space', 'assets/space.png');
+    game.load.audio('sfx', 'assets/fx_mixdown.ogg');
+    game.load.audio('explosion_alien', 'assets/explosion.mp3');
+    game.load.audio('backgroundMusic', 'assets/background_music.mp3');
+}
+
+var hero;
+var hero_bullets;                   // group for the hero's bullets
+var hero_bullet_delay_time = 0;     // var to prevent continous firing of the hero
+var hero_controls;                 
+var hero_firingKey;
+var hero_lives;
+var enemies;                        // group for the enemies
+var enemyBullet;
+var enemy_firingTimer = 0;          // var to control the time when the enemy fires
+var livingEnemies = [];
+var enemyBossHealthBar;
+var bossHealth = 100;
+var explosions;
+var space;
+var score = 0;
+var scoreText;
+var scoreString = 'Score : ';
+var gameStatus;
+var level = 1;
+var levelString = 'Level: ';
+var levelText;
+var fx;
+var explosion_audio;
+var backgroundMusic;
+
+
+function create() {
+
+    game.physics.startSystem(Phaser.Physics.ARCADE);
+
+    // adding and setting the scrolling background
+    space = game.add.tileSprite(0, 0, 800, 600, 'space');
+
+    // adding and setting the healthbar of the enemy boss
+    enemyBossHealthBar = new HealthBar(this.game, {x: -100, y: -100, width: 120, height: 15});
+
+    // adding and setting up audio effects
+    fx = game.add.audio('sfx');
+    explosion_audio = game.add.audio('explosion_alien');
+    backgroundMusic = game.add.audio('backgroundMusic');
+    explosion_audio.allowMultiple = true;
+    fx.allowMultiple = true;
+    fx.addMarker('shot', 17, 1.0);
+    explosion_audio.addMarker('explode', 0, 1.0);
+    backgroundMusic.addMarker('background_music', 10, 30000);
+    backgroundMusic.play('background_music');
+
+    // adding and setting the hero_bullet group
+    hero_bullets = game.add.group();
+    hero_bullets.enableBody = true;
+    hero_bullets.physicsBodyType = Phaser.Physics.ARCADE;
+    hero_bullets.createMultiple(30, 'hero_bullet');
+    hero_bullets.setAll('anchor.x', 0.5);
+    hero_bullets.setAll('anchor.y', 1);
+    hero_bullets.setAll('outOfBoundsKill', true);
+    hero_bullets.setAll('checkWorldBounds', true);
+
+    // adding and setting the hero
+    hero = game.add.sprite(400, 500, 'hero_ship');
+    hero.anchor.setTo(0.5, 0.5);
+    game.physics.enable(hero, Phaser.Physics.ARCADE);
+
+    // creating the hero lives group
+    hero_lives = game.add.group();
+
+    // adding and setting the enemies bullets
+    enemyBullets = game.add.group();
+    enemyBullets.enableBody = true;
+    enemyBullets.physicsBodyType = Phaser.Physics.ARCADE;
+    enemyBullets.createMultiple(30, 'enemyBullet');
+    enemyBullets.setAll('anchor.x', 0.5);
+    enemyBullets.setAll('anchor.y', 1);
+    enemyBullets.setAll('outOfBoundsKill', true);
+    enemyBullets.setAll('checkWorldBounds', true);
+
+    // setting an enemy group
+    enemies = game.add.group();
+    enemies.enableBody = true;
+    enemies.physicsBodyType = Phaser.Physics.ARCADE;
+
+    // calling respective functions
+    createEnemies();
+    createHeroLives();
+
+    var font_style = { font: "bold 24px Calibri", fill: "#fff"};
+    scoreText = game.add.text(10, 10, scoreString + score, font_style);   // adding the score text
+    levelText = game.add.text(180, 10, levelString + level, font_style);  // adding the level text
+    game.add.text(game.world.width - 100, 10, 'Lives : ', font_style);    // adding the lives text
+
+    // adding and setting the game status
+    var font_style_center = { font: "38px Calibri", fill: "#fff", align: "center"};
+    gameStatus = game.add.text(game.world.centerX,game.world.centerY,' ', font_style_center);
+    gameStatus.anchor.setTo(0.5, 0.5);
+    //gameStatus.visible = false;
+
+    // adding and setting the explosions
+    explosions = game.add.group();
+    explosions.createMultiple(30, 'explosion_sprite');
+    explosions.forEach(setupEnemies, this);
+
+    //  And some controls to play the game with
+    hero_controls = game.input.keyboard.createCursorKeys();
+    hero_firingKey = game.input.keyboard.addKey(Phaser.Keyboard.SPACEBAR);
+
+    gameStatus.text="Arrow keys for control and spacebar to shoot." + "\n" + "Click to start. Goodluck!";
+    gameStatus.visible = true;
+}
+
+function createHeroLives() {
+    // creating 3 lives for the hero
+    for (var i = 0; i < 3; i++) 
+    {
+        var hero_ship = hero_lives.create(game.world.width - 100 + (30 * i), 60, 'hero_ship');
+        hero_ship.anchor.setTo(0.5, 0.5);
+        hero_ship.angle = 90;
+        hero_ship.alpha = 0.4;
+    }
+}
+
+function createEnemies () {
+
+    // creating 4 layers of enemies
+    for (var y = 0; y < 4; y++)         
+    {
+        // creating 10 enemies for each layer
+        for (var x = 0; x < 10; x++)
+        {
+            // based on the level, adding and setting the enemies
+            if(level == 1)
+            {
+            	var enemy = enemies.create(x * 48, y * 50, 'invader1');
+        	}
+        	else if (level == 2)
+        	{
+        		var enemy = enemies.create(x * 48, y * 50, 'invader2');
+        	}
+        	else if(level == 3)
+        	{
+        		var enemy = enemies.create(x * 48, y * 50, 'invader3');
+        	}
+        	else
+        	{
+        		var enemy = enemies.create(x * 100, y * 100, 'invaderboss');
+        		x = 10;
+        		y = 4;
+                enemyBossHealthBar.setPosition(400, 10);
+        	}
+
+        	if(level < 4) 
+        	{
+        		enemy.anchor.setTo(0.5, 0.5);     //setting the enemy starting position
+        	}
+            
+            enemy.body.moves = false;
+        }
+    }
+
+    enemies.x = 100;
+    enemies.y = 50;
+
+    // adding and setting a tween to create movement of the enemy group
+    var tween = game.add.tween(enemies).to( { x: 200 }, 2000, Phaser.Easing.Linear.None, true, 0, 1000, true);
+
+    // for each loop, the enemies descend
+    tween.onLoop.add(descend, this);
+}
+
+function setupEnemies (enemy) {
+
+    enemy.anchor.x = 0.5;
+    enemy.anchor.y = 0.5;
+    enemy.animations.add('explosion_sprite');
+
+}
+
+function descend() {
+
+    enemies.y += 5;
+
+}
+
+function update() {
+
+    // continuous scrolling of the background
+    space.tilePosition.y += 2;
+
+    if (hero.alive)
+    {
+        // stops the hero's movement, then check for keys pressed
+        hero.body.velocity.setTo(0, 0);
+
+        if (hero_controls.left.isDown)
+        {
+            hero.body.velocity.x = -200;
+        }
+        else if (hero_controls.right.isDown)
+        {
+            hero.body.velocity.x = 200;
+        }
+        else if(hero_controls.up.isDown) 
+        {
+        	hero.body.velocity.y = -200;
+        }
+        else if(hero_controls.down.isDown)
+        {
+        	hero.body.velocity.y = 200;
+        }
+
+        // checks if the firing key is pressed
+        if (hero_firingKey.isDown)
+        {
+            fireBullet();
+        }
+
+        if (game.time.now > enemy_firingTimer)      // checks if it's time for the enemy to fire
+        {
+            enemyFires();
+        }
+
+
+        // checking collisions
+        game.physics.arcade.overlap(hero_bullets, enemies, heroShotEnemy, null, this);
+        game.physics.arcade.overlap(enemyBullets, hero, enemyHitsHero, null, this);
+    }
+
+}
+
+function render() {
+
+}
+
+// if an enemy is shot, both the enemy and the buller are killed and an explosion is created
+function heroShotEnemy (hero_bullet, enemy) {
+    
+    // the score is increased for each hit
+    score += 20;
+    scoreText.text = scoreString + score;
+
+    
+
+    hero_bullet.kill();
+    if (level < 4)  //checking for the game level
+    {
+    	enemy.kill();
+    	var explosion = explosions.getFirstExists(false);
+    	explosion.reset(enemy.body.x, enemy.body.y);
+    	explosion.play('explosion_sprite', 30, false, true);
+    	explosion_audio.play('explode');	
+    }
+    else // if the enemy is the boss, the boss's health is reduced for each hit
+    {
+    	
+    	bossHealth -= 5;
+    	enemyBossHealthBar.setPercent(bossHealth); 
+    	if(bossHealth == 0) {      // if the boss's health reached zero, it is killed
+    		enemy.kill();
+    		
+    		var explosion = explosions.getFirstExists(false); //create explosion
+    		explosion.reset(enemy.body.x, enemy.body.y);
+    		explosion.play('explosion_sprite', 30, false, true);
+    		explosion_audio.play('explode');
+    	}
+    }
+
+    if (enemies.countLiving() == 0)     // checks remaining enemies
+    {
+        score += 100;       // additional score if a round is completed
+        scoreText.text = scoreString + score;
+
+        if( level < 4)
+        {
+            enemyBullets.callAll('kill',this);
+            gameStatus.text = " You Won!!!" + "\n" + "Click to proceed to the next level";
+            gameStatus.visible = true;
+
+            //setting the game to the next level
+            level += 1;
+            levelText.text = levelString + level;
+
+            // when click, the next level function is load
+            game.input.onTap.addOnce(nextLevel, this); 
+        }
+        else
+        {
+            gameOver();
+        }
+
+
+
+    }
+
+}
+
+// if the hero is shot, both the hero and the bullet are killed and an explosion is created
+function enemyHitsHero (hero,hero_bullet) {
+    
+    hero_bullet.kill();     // kills the hero bullet
+
+    live = hero_lives.getFirstAlive();
+
+    if (live)
+    {
+        live.kill();
+    }
+
+    var explosion = explosions.getFirstExists(false);
+    explosion.reset(hero.body.x, hero.body.y);
+    explosion.play('explosion_sprite', 30, false, true);
+    explosion_audio.play('explode');
+
+    // when the all the lives of the hero is used up
+    if (hero_lives.countLiving() < 1)
+    {
+        hero.kill();
+        enemyBullets.callAll('kill');
+
+        gameOver();
+    }
+
+}
+
+function gameOver() {
+        gameStatus.text=" GAME OVER" + "\n" + " Click to restart";
+        gameStatus.visible = true;
+
+        score = 0;
+        scoreText.text = scoreString + score;
+
+        //setting to the next level
+        level = 1;
+        levelText.text = levelString + level;
+        bossHealth = 100;
+        enemyBossHealthBar.setPosition(-100, -100);
+
+        // on click restart the game
+        game.input.onTap.addOnce(restart,this);
+}
+
+function enemyFires () {
+
+    enemyBullet = enemyBullets.getFirstExists(false);   // gets bullet from the enemy bullet group
+
+    livingEnemies.length = 0;
+
+    enemies.forEachAlive(function(enemy){   // setting enemies in an array
+
+        livingEnemies.push(enemy);
+    });
+
+
+    if (enemyBullet && livingEnemies.length > 0)
+    {
+        
+        var random=game.rnd.integerInRange(0,livingEnemies.length-1);   // setting a random variable based on the number of living enemies
+
+        var shooter=livingEnemies[random];  // randomly selects an enemy to shoot the hero
+
+        enemyBullet.reset(shooter.body.x, shooter.body.y - 10); // shoots bullet from this random enemy
+
+        if(level == 1) 
+        {
+        	game.physics.arcade.moveToObject(enemyBullet,hero,150);    // setting the speed of the bullet going towards the hero
+        	enemy_firingTimer = game.time.now + 2000;                  // setting the frequency of the enemy fire
+    	}                                                              // different levels have different value to create a more
+    	else if (level == 2)                                           // difficult scenario for each level
+    	{
+    		game.physics.arcade.moveToObject(enemyBullet,hero,250);
+        	enemy_firingTimer = game.time.now + 1000;
+    	}
+    	else if (level == 3)
+    	{
+    		game.physics.arcade.moveToObject(enemyBullet,hero,350);   
+        	enemy_firingTimer = game.time.now + 500;   
+    	}
+    	else
+    	{
+    		game.physics.arcade.moveToObject(enemyBullet,hero,450); 
+        	enemy_firingTimer = game.time.now + 200;   
+    	}
+    }
+
+}
+
+function fireBullet () {
+
+    gameStatus.visible = false;
+
+    // checks the time if the hero can shoot again, this is to prevent continuous shooting
+    if (game.time.now > hero_bullet_delay_time)
+    {
+        hero_bullet = hero_bullets.getFirstExists(false);
+
+        if (hero_bullet)
+        {
+            //  fires the bullet
+            hero_bullet.reset(hero.x, hero.y + 8);
+            hero_bullet.body.velocity.y = -400;
+            fx.play('shot');
+            hero_bullet_delay_time = game.time.now + 200;
+        }
+    }
+
+}
+
+function resetBullet (hero_bullet) {
+
+    // kills the bullet if it leaves the screen
+    hero_bullet.kill();
+
+}
+
+function restart () {
+
+    //resets the life count
+    hero_lives.callAll('revive');
+
+    // revives all enemies
+    enemies.removeAll();
+    createEnemies();
+
+    // revives the hero
+    hero.revive();
+    
+    // hides the game status
+    gameStatus.visible = false;
+
+}
+
+function nextLevel() {
+
+
+	// prepares the new enemies
+    enemies.removeAll();
+    createEnemies();
+
+    // revives the hero
+    hero.revive();
+
+    // hides the gane status
+    gameStatus.visible = false;
+}
+
+</script>
+
+</body>
+</html>
